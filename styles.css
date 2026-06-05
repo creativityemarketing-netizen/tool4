@@ -498,6 +498,11 @@ textarea::selection {
   -webkit-backdrop-filter: blur(10px);
 }
 
+/* Ensure hidden attribute is not overridden by display:grid above */
+.modal-overlay[hidden] {
+  display: none;
+}
+
 .modal-box {
   width: min(480px, 100%);
   border: 1px solid var(--line);
