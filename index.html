@@ -124,5 +124,45 @@
     </main>
 
     <script src="app.js"></script>
+
+    <!-- ── Login modal ── -->
+    <div id="loginOverlay" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+      <div class="modal-box">
+        <div class="modal-brand">
+          <span class="brand-mark" aria-hidden="true">V</span>
+          VoxText Studio
+        </div>
+        <h2 id="loginTitle" class="modal-title">Welcome</h2>
+        <p class="modal-subtitle">Enter your email address to continue.</p>
+        <form id="loginForm" novalidate>
+          <label class="modal-label" for="loginEmail">Email</label>
+          <input class="modal-input" id="loginEmail" type="email" placeholder="you@example.com" autocomplete="email" required />
+          <div id="adminPasswordRow" hidden>
+            <label class="modal-label" for="adminPassword">Admin password</label>
+            <input class="modal-input" id="adminPassword" type="password" placeholder="Enter admin password" autocomplete="current-password" />
+          </div>
+          <button class="modal-btn" type="submit" id="loginBtn">Continue</button>
+          <p id="loginMessage" class="modal-message" aria-live="polite"></p>
+        </form>
+      </div>
+    </div>
+
+    <!-- ── Paywall / contact modal ── -->
+    <div id="paywallOverlay" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="paywallTitle" hidden>
+      <div class="modal-box">
+        <h2 id="paywallTitle" class="modal-title">Trial limit reached</h2>
+        <p class="modal-subtitle">You've used your 2 free transcriptions. Fill in the form below and we'll get back to you about extended access.</p>
+        <form id="contactForm" novalidate>
+          <label class="modal-label" for="contactName">Full name <span class="modal-required">*</span></label>
+          <input class="modal-input" id="contactName" type="text" placeholder="Your name" required />
+          <label class="modal-label" for="contactPhone">Phone number</label>
+          <input class="modal-input" id="contactPhone" type="tel" placeholder="+1 555 000 0000" />
+          <label class="modal-label" for="contactMsg">Tell us about your use case <span class="modal-required">*</span></label>
+          <textarea class="modal-textarea" id="contactMsg" placeholder="How will you use VoxText Studio?" required></textarea>
+          <button class="modal-btn" type="submit" id="contactBtn">Send request</button>
+          <p id="contactFeedback" class="modal-message" aria-live="polite"></p>
+        </form>
+      </div>
+    </div>
   </body>
 </html>

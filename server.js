@@ -2,11 +2,22 @@ import "dotenv/config";
 import express from "express";
 import multer from "multer";
 import OpenAI from "openai";
+import session from "express-session";
+import { default as FileStoreFactory } from "session-file-store";
 import { createReadStream } from "node:fs";
 import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import {
+  requireAuth,
+  requireAdminSession,
+  handleLogin,
+  handleAdminApprove,
+  handleAdminPending,
+  handleContactSubmit,
+  incrementUserUses
+} from "./auth.js";
 
 const app = express();
 const root = resolve(".");
@@ -16,8 +27,18 @@ const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024 }
 });
 
+const FileStore = FileStoreFactory(session);
+
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(root));
+
+app.use(session({
+  secret: process.env.SESSION_SECRET || "dev-fallback-secret-change-me",
+  resave: false,
+  saveUninitialized: false,
+  store: new FileStore({ path: join(root, ".sessions"), ttl: 7 * 24 * 60 * 60, logFn: () => {} }),
+  cookie: { httpOnly: true, sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 }
+}));
 
 function proxiedUrl(url) {
   return url ? `/api/proxy-image?url=${encodeURIComponent(url)}` : "";
@@ -261,8 +282,40 @@ async function transcribeFile(filePath, language, speed, diarize = false) {
   };
 }
 
-app.post("/api/transcribe", async (req, res, next) => {
+// ─── Auth routes ─────────────────────────────────────────────────────────────
+
+app.get("/api/auth/status", (req, res) => {
+  if (!req.session || !req.session.email) {
+    return res.json({ authenticated: false });
+  }
+  res.json({
+    authenticated: true,
+    email: req.session.email,
+    role: req.session.role,
+    usesLeft: req.session.usesLeft
+  });
+});
+
+app.post("/api/auth/login", handleLogin);
+
+app.post("/api/auth/logout", (req, res) => {
+  req.session.destroy(() => res.json({ ok: true }));
+});
+
+// ─── Admin routes ─────────────────────────────────────────────────────────────
+
+app.post("/api/admin/approve", requireAdminSession, handleAdminApprove);
+app.get("/api/admin/pending", requireAdminSession, handleAdminPending);
+
+// ─── Contact / paywall form ───────────────────────────────────────────────────
+
+app.post("/api/contact", handleContactSubmit);
+
+// ─── Transcription routes (auth-gated) ───────────────────────────────────────
+
+app.post("/api/transcribe", requireAuth, async (req, res, next) => {
   let jobDir;
+  let succeeded = false;
   try {
     const { url, language, speed, diarize } = req.body;
     if (!url || typeof url !== "string") {
@@ -281,9 +334,14 @@ app.post("/api/transcribe", async (req, res, next) => {
     const result = await transcribeFile(downloaded.filePath, language, speed, wantsDiarization);
     result.info = mediaInfo;
     res.json(result);
+    succeeded = true;
   } catch (error) {
     next(error);
   } finally {
+    if (succeeded && req.session?.role === "user") {
+      req.session.usesLeft = Math.max(0, (req.session.usesLeft ?? 1) - 1);
+      await incrementUserUses(req.session.email).catch(console.error);
+    }
     if (jobDir) {
       await rm(jobDir, { recursive: true, force: true });
     }
@@ -338,7 +396,8 @@ app.get("/api/proxy-image", async (req, res, next) => {
   }
 });
 
-app.post("/api/transcribe-upload", upload.single("media"), async (req, res, next) => {
+app.post("/api/transcribe-upload", requireAuth, upload.single("media"), async (req, res, next) => {
+  let succeeded = false;
   try {
     if (!req.file) {
       const error = new Error("Choose a video or audio file first.");
@@ -376,9 +435,14 @@ app.post("/api/transcribe-upload", upload.single("media"), async (req, res, next
       pageUrl: ""
     };
     res.json(result);
+    succeeded = true;
   } catch (error) {
     next(error);
   } finally {
+    if (succeeded && req.session?.role === "user") {
+      req.session.usesLeft = Math.max(0, (req.session.usesLeft ?? 1) - 1);
+      await incrementUserUses(req.session.email).catch(console.error);
+    }
     if (req.file?.path) {
       await rm(req.file.path, { force: true });
     }

@@ -1,3 +1,168 @@
+// ═══════════════════════════════════════════════════════════════════
+//  Auth module — runs before anything else
+// ═══════════════════════════════════════════════════════════════════
+
+let authSession = null;
+
+function showModal(id) {
+  const el = document.getElementById(id);
+  if (el) el.hidden = false;
+}
+
+function hideModal(id) {
+  const el = document.getElementById(id);
+  if (el) el.hidden = true;
+}
+
+async function initAuth() {
+  try {
+    const res = await fetch("/api/auth/status");
+    const data = await res.json();
+    if (data.authenticated) {
+      authSession = data;
+      hideModal("loginOverlay");
+      if (data.role === "user" && (data.usesLeft ?? 1) <= 0) {
+        showModal("paywallOverlay");
+      }
+    } else {
+      showModal("loginOverlay");
+    }
+  } catch {
+    showModal("loginOverlay");
+  }
+}
+
+// ── Login form handler ──────────────────────────────────────────────
+
+document.getElementById("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const emailInput = document.getElementById("loginEmail");
+  const passwordInput = document.getElementById("adminPassword");
+  const passwordRow = document.getElementById("adminPasswordRow");
+  const msg = document.getElementById("loginMessage");
+  const btn = document.getElementById("loginBtn");
+
+  const email = emailInput.value.trim();
+  if (!email) {
+    msg.className = "modal-message error";
+    msg.textContent = "Please enter your email address.";
+    return;
+  }
+
+  btn.disabled = true;
+  msg.className = "modal-message";
+  msg.textContent = "Checking…";
+
+  const body = { email };
+  if (!passwordRow.hidden) body.password = passwordInput.value;
+
+  try {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      msg.className = "modal-message error";
+      msg.textContent = data.error || "Something went wrong. Try again.";
+      btn.disabled = false;
+      return;
+    }
+
+    if (data.requiresPassword) {
+      passwordRow.hidden = false;
+      msg.className = "modal-message";
+      msg.textContent = "Enter the admin password to continue.";
+      passwordInput.focus();
+      btn.disabled = false;
+      return;
+    }
+
+    if (data.status === "pending") {
+      msg.className = "modal-message";
+      msg.textContent = "Your access request is pending approval. Check back soon.";
+      btn.disabled = false;
+      return;
+    }
+
+    if (data.ok) {
+      authSession = {
+        authenticated: true,
+        email,
+        role: data.role,
+        usesLeft: data.usesLeft ?? null
+      };
+      hideModal("loginOverlay");
+      if (data.role === "user" && (data.usesLeft ?? 1) <= 0) {
+        showModal("paywallOverlay");
+      }
+    }
+  } catch {
+    msg.className = "modal-message error";
+    msg.textContent = "Network error. Check your connection and try again.";
+    btn.disabled = false;
+  }
+});
+
+// ── Contact / paywall form handler ─────────────────────────────────
+
+document.getElementById("contactForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById("contactFeedback");
+  const btn = document.getElementById("contactBtn");
+
+  const name = document.getElementById("contactName").value.trim();
+  const phone = document.getElementById("contactPhone").value.trim();
+  const message = document.getElementById("contactMsg").value.trim();
+
+  if (!name) {
+    msg.className = "modal-message error";
+    msg.textContent = "Please enter your name.";
+    return;
+  }
+  if (!message) {
+    msg.className = "modal-message error";
+    msg.textContent = "Please describe your use case.";
+    return;
+  }
+
+  btn.disabled = true;
+  msg.className = "modal-message";
+  msg.textContent = "Sending…";
+
+  try {
+    const res = await fetch("/api/contact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, phone, message })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      msg.className = "modal-message error";
+      msg.textContent = data.error || "Could not send. Please try again.";
+      btn.disabled = false;
+      return;
+    }
+
+    msg.className = "modal-message success";
+    msg.textContent = "Request sent! We'll be in touch soon.";
+    document.getElementById("contactForm")
+      .querySelectorAll("input, textarea, button")
+      .forEach((el) => { el.disabled = true; });
+  } catch {
+    msg.className = "modal-message error";
+    msg.textContent = "Network error. Please try again.";
+    btn.disabled = false;
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+//  Main app
+// ═══════════════════════════════════════════════════════════════════
+
 const form = document.querySelector("#transcriptForm");
 const input = document.querySelector("#videoUrl");
 const output = document.querySelector("#transcriptOutput");
@@ -277,15 +442,24 @@ async function generateTranscript(event) {
     const response = await fetch("/api/transcribe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url, language: language.value, speed: "accurate", diarize: speakerSeparation.checked })
+      body: JSON.stringify({ url, language: language.value, speed: "accurate", diarize: speakerSeparation.checked })
     });
     const payload = await response.json();
+    if (response.status === 401) { showModal("loginOverlay"); return; }
+    if (response.status === 402) { showModal("paywallOverlay"); return; }
     if (!response.ok) throw new Error(payload.error || "Transcription failed.");
 
     updateMediaInfo(payload.info || infoPayload.info);
     updateTranscript(payload, `Transcript from ${detectSource(url)}`);
     processNote.textContent = "Transcription complete.";
     document.querySelector("#toolPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+
+    if (authSession?.role === "user") {
+      authSession.usesLeft = Math.max(0, (authSession.usesLeft ?? 1) - 1);
+      if (authSession.usesLeft <= 0) {
+        setTimeout(() => showModal("paywallOverlay"), 900);
+      }
+    }
   } catch (error) {
     mediaPreview.classList.remove("loading");
     platformEl.textContent = "Transcription failed";
@@ -339,12 +513,21 @@ async function generateUploadTranscript() {
       body
     });
     const payload = await response.json();
+    if (response.status === 401) { showModal("loginOverlay"); return; }
+    if (response.status === 402) { showModal("paywallOverlay"); return; }
     if (!response.ok) throw new Error(payload.error || "Transcription failed.");
 
     updateMediaInfo(payload.info);
     updateTranscript(payload, "Uploaded media transcript");
     processNote.textContent = "Transcription complete.";
     document.querySelector("#toolPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+
+    if (authSession?.role === "user") {
+      authSession.usesLeft = Math.max(0, (authSession.usesLeft ?? 1) - 1);
+      if (authSession.usesLeft <= 0) {
+        setTimeout(() => showModal("paywallOverlay"), 900);
+      }
+    }
   } catch (error) {
     platformEl.textContent = "Transcription failed";
     output.value = error.message;
@@ -401,3 +584,6 @@ copyBtn.addEventListener("click", async () => {
 downloadBtn.addEventListener("click", downloadTranscript);
 mediaFile.addEventListener("change", generateUploadTranscript);
 updateDownloadLabel();
+
+// Start auth check — shows login modal if not authenticated
+initAuth();
