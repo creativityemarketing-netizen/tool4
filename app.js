@@ -21,6 +21,9 @@ async function initAuth() {
     if (data.authenticated) {
       authSession = data;
       hideModal("loginOverlay");
+      if (data.role === "admin") {
+        revealAdminButton();
+      }
       if (data.role === "user" && (data.usesLeft ?? 1) <= 0) {
         showModal("paywallOverlay");
       }
@@ -95,6 +98,10 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
         usesLeft: data.usesLeft ?? null
       };
       hideModal("loginOverlay");
+      if (data.role === "admin") {
+        revealAdminButton();
+        openAdminDashboard();
+      }
       if (data.role === "user" && (data.usesLeft ?? 1) <= 0) {
         showModal("paywallOverlay");
       }
@@ -104,6 +111,125 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
     msg.textContent = "Network error. Check your connection and try again.";
     btn.disabled = false;
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+//  Admin dashboard
+// ═══════════════════════════════════════════════════════════════════
+
+function revealAdminButton() {
+  const btn = document.getElementById("adminDashboardBtn");
+  if (btn) btn.hidden = false;
+}
+
+function formatRequestDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+  });
+}
+
+async function loadPending() {
+  const list = document.getElementById("adminPendingList");
+  list.innerHTML = `<p class="admin-empty">Loading…</p>`;
+
+  try {
+    const res = await fetch("/api/admin/pending");
+    if (!res.ok) throw new Error();
+    const { pending } = await res.json();
+
+    if (!pending || pending.length === 0) {
+      list.innerHTML = `<p class="admin-empty">No pending requests. You're all caught up.</p>`;
+      return;
+    }
+
+    list.innerHTML = "";
+    for (const req of pending) {
+      const row = document.createElement("div");
+      row.className = "admin-row";
+      row.dataset.email = req.email;
+
+      const info = document.createElement("div");
+      info.className = "admin-row-info";
+      const emailEl = document.createElement("div");
+      emailEl.className = "admin-row-email";
+      emailEl.textContent = req.email;
+      const dateEl = document.createElement("div");
+      dateEl.className = "admin-row-date";
+      dateEl.textContent = formatRequestDate(req.requestedAt);
+      info.append(emailEl, dateEl);
+
+      const actions = document.createElement("div");
+      actions.className = "admin-row-actions";
+      const approveBtn = document.createElement("button");
+      approveBtn.type = "button";
+      approveBtn.className = "admin-action-btn admin-approve";
+      approveBtn.textContent = "Approve";
+      approveBtn.dataset.action = "approve";
+      const rejectBtn = document.createElement("button");
+      rejectBtn.type = "button";
+      rejectBtn.className = "admin-action-btn admin-reject";
+      rejectBtn.textContent = "Deny";
+      rejectBtn.dataset.action = "reject";
+      actions.append(approveBtn, rejectBtn);
+
+      row.append(info, actions);
+      list.appendChild(row);
+    }
+  } catch {
+    list.innerHTML = `<p class="admin-empty">Could not load requests. Try Refresh.</p>`;
+  }
+}
+
+async function handleRequestAction(row, action) {
+  const email = row.dataset.email;
+  const buttons = row.querySelectorAll("button");
+  buttons.forEach((b) => { b.disabled = true; });
+
+  const endpoint = action === "approve" ? "/api/admin/approve" : "/api/admin/reject";
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email })
+    });
+    if (!res.ok) throw new Error();
+    // Remove the row; refresh empty-state if it was the last one.
+    const list = row.parentElement;
+    row.remove();
+    if (list && !list.querySelector(".admin-row")) {
+      list.innerHTML = `<p class="admin-empty">No pending requests. You're all caught up.</p>`;
+    }
+  } catch {
+    buttons.forEach((b) => { b.disabled = false; });
+    const info = row.querySelector(".admin-row-date");
+    if (info) info.textContent = "Action failed — try again.";
+  }
+}
+
+function openAdminDashboard() {
+  showModal("adminOverlay");
+  loadPending();
+}
+
+document.getElementById("adminDashboardBtn")?.addEventListener("click", openAdminDashboard);
+document.getElementById("adminRefreshBtn")?.addEventListener("click", loadPending);
+document.getElementById("adminCloseBtn")?.addEventListener("click", () => hideModal("adminOverlay"));
+
+document.getElementById("adminPendingList")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-action]");
+  if (!btn) return;
+  const row = btn.closest(".admin-row");
+  if (row) handleRequestAction(row, btn.dataset.action);
+});
+
+document.getElementById("adminLogoutBtn")?.addEventListener("click", async () => {
+  try {
+    await fetch("/api/auth/logout", { method: "POST" });
+  } catch { /* ignore */ }
+  window.location.reload();
 });
 
 // ── Contact / paywall form handler ─────────────────────────────────

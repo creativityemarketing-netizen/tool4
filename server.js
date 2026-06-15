@@ -15,6 +15,7 @@ import {
   handleLogin,
   handleAdminApprove,
   handleAdminPending,
+  handleAdminReject,
   handleContactSubmit,
   incrementUserUses
 } from "./auth.js";
@@ -305,6 +306,7 @@ app.post("/api/auth/logout", (req, res) => {
 // ─── Admin routes ─────────────────────────────────────────────────────────────
 
 app.post("/api/admin/approve", requireAdminSession, handleAdminApprove);
+app.post("/api/admin/reject", requireAdminSession, handleAdminReject);
 app.get("/api/admin/pending", requireAdminSession, handleAdminPending);
 
 // ─── Contact / paywall form ───────────────────────────────────────────────────

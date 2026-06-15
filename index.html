@@ -15,6 +15,7 @@
         <span class="brand-mark">V</span>
         <span>VoxText Studio</span>
       </a>
+      <button type="button" id="adminDashboardBtn" class="admin-nav-btn" hidden>Admin dashboard</button>
     </header>
 
     <main id="top" class="app-shell">
@@ -160,6 +161,28 @@
           <button class="modal-btn" type="submit" id="contactBtn">Send request</button>
           <p id="contactFeedback" class="modal-message" aria-live="polite"></p>
         </form>
+      </div>
+    </div>
+
+    <!-- ── Admin dashboard modal ── -->
+    <div id="adminOverlay" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="adminTitle" hidden>
+      <div class="modal-box admin-box">
+        <div class="admin-head">
+          <div>
+            <h2 id="adminTitle" class="modal-title">Access requests</h2>
+            <p class="modal-subtitle" id="adminSubtitle">People waiting for approval to use VoxText Studio.</p>
+          </div>
+          <button type="button" id="adminRefreshBtn" class="admin-ghost-btn" title="Refresh list">Refresh</button>
+        </div>
+
+        <div id="adminPendingList" class="admin-list" aria-live="polite">
+          <p class="admin-empty">Loading…</p>
+        </div>
+
+        <div class="admin-foot">
+          <button type="button" id="adminCloseBtn" class="admin-ghost-btn">Close</button>
+          <button type="button" id="adminLogoutBtn" class="admin-ghost-btn admin-logout">Log out</button>
+        </div>
       </div>
     </div>
 

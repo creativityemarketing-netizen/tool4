@@ -646,3 +646,146 @@ textarea::selection {
 #adminPasswordRow {
   margin-top: 4px;
 }
+
+/* ── Admin dashboard ── */
+.admin-nav-btn {
+  margin-left: auto;
+  border: 1.5px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 16px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.admin-nav-btn:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.admin-box {
+  width: min(600px, 100%);
+}
+
+.admin-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.admin-head .modal-subtitle {
+  margin-bottom: 20px;
+}
+
+.admin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.admin-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.admin-row-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-row-email {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-row-date {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.admin-row-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.admin-action-btn {
+  border: none;
+  border-radius: 7px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.admin-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.admin-approve {
+  color: #fff;
+  background: var(--green, #16a34a);
+}
+
+.admin-reject {
+  color: #c0392b;
+  background: rgba(192, 57, 43, 0.1);
+}
+
+.admin-reject:hover:not(:disabled) {
+  background: rgba(192, 57, 43, 0.18);
+}
+
+.admin-empty {
+  margin: 0;
+  padding: 24px 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.admin-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.admin-ghost-btn {
+  border: 1.5px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 18px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.admin-ghost-btn:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.admin-logout:hover {
+  border-color: #c0392b;
+  color: #c0392b;
+}

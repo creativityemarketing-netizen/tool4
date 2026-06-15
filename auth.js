@@ -242,6 +242,19 @@ export async function handleAdminPending(req, res) {
   res.json({ pending });
 }
 
+export async function handleAdminReject(req, res) {
+  const email = (req.body.email || "").trim().toLowerCase();
+  if (!email) return res.status(400).json({ error: "Email required." });
+
+  const users = await readUsers();
+  if (!users[email]) {
+    return res.status(404).json({ error: "No request found for that email." });
+  }
+  delete users[email];
+  await writeUsers(users);
+  res.json({ ok: true, email });
+}
+
 export async function handleContactSubmit(req, res) {
   const { name, phone, message } = req.body || {};
   const email = req.session?.email || (req.body?.email || "").trim().toLowerCase();
