@@ -341,8 +341,12 @@ app.post("/api/transcribe", requireAuth, async (req, res, next) => {
     next(error);
   } finally {
     if (succeeded && req.session?.role === "user") {
-      req.session.usesLeft = Math.max(0, (req.session.usesLeft ?? 1) - 1);
-      await incrementUserUses(req.session.email).catch(console.error);
+      const used = await incrementUserUses(req.session.email);
+      if (used && !used.unlimited) {
+        req.session.usesLeft = Math.max(0, (used.trialLimit ?? 3) - (used.trialsUsed ?? 0));
+      } else {
+        req.session.usesLeft = Math.max(0, (req.session.usesLeft ?? 1) - 1);
+      }
     }
     if (jobDir) {
       await rm(jobDir, { recursive: true, force: true });
@@ -442,8 +446,12 @@ app.post("/api/transcribe-upload", requireAuth, upload.single("media"), async (r
     next(error);
   } finally {
     if (succeeded && req.session?.role === "user") {
-      req.session.usesLeft = Math.max(0, (req.session.usesLeft ?? 1) - 1);
-      await incrementUserUses(req.session.email).catch(console.error);
+      const used = await incrementUserUses(req.session.email);
+      if (used && !used.unlimited) {
+        req.session.usesLeft = Math.max(0, (used.trialLimit ?? 3) - (used.trialsUsed ?? 0));
+      } else {
+        req.session.usesLeft = Math.max(0, (req.session.usesLeft ?? 1) - 1);
+      }
     }
     if (req.file?.path) {
       await rm(req.file.path, { force: true });

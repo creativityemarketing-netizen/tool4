@@ -1,60 +1,58 @@
-import nodemailer from "nodemailer";
-import { readFile, writeFile, appendFile, mkdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+/*
+ * tool4 auth — backed by the Creativity Solutions Google Sheet.
+ *
+ * The Sheet (via the Apps Script web app) is the single source of truth for
+ * who is approved, their role (user | staff), trial usage, and payment state.
+ * This module never stores users locally; it just calls the Sheet API.
+ *
+ * Required env:
+ *   SHEET_API_URL      — the Apps Script /exec URL (same as the website's apiUrl)
+ *   SHEET_SERVER_SECRET — matches the Apps Script Script Property SERVER_SECRET
+ *   ADMIN_EMAILS       — comma-separated owner emails (full access in the tool)
+ *   ADMIN_PASSWORD     — shared password those admins type after their email
+ */
 
-const root = resolve(".");
-const dataDir = join(root, "data");
-const usersFile = join(dataDir, "users.json");
-const contactsFile = join(dataDir, "contacts.json");
-const requestsCsv = join(dataDir, "requests.csv");
+const TRIAL_LIMIT = 3;
 
-// Ensure data/ exists on startup
-await mkdir(dataDir, { recursive: true });
+const SHEET_API_URL = process.env.SHEET_API_URL || "";
+const SHEET_SERVER_SECRET = process.env.SHEET_SERVER_SECRET || "";
 
-// ─── Data helpers ────────────────────────────────────────────────────────────
+// ─── Sheet API client ──────────────────────────────────────────────────────
 
-async function readUsers() {
-  try {
-    return JSON.parse(await readFile(usersFile, "utf8"));
-  } catch {
-    return {};
+async function sheetApi(action, body = {}) {
+  if (!SHEET_API_URL) {
+    const error = new Error("Access service is not configured (missing SHEET_API_URL).");
+    error.status = 500;
+    throw error;
   }
-}
-
-async function writeUsers(data) {
-  await writeFile(usersFile, JSON.stringify(data, null, 2), "utf8");
-}
-
-async function readContacts() {
+  let res;
   try {
-    return JSON.parse(await readFile(contactsFile, "utf8"));
-  } catch {
-    return [];
-  }
-}
-
-async function writeContacts(data) {
-  await writeFile(contactsFile, JSON.stringify(data, null, 2), "utf8");
-}
-
-async function appendRequestCsv(email) {
-  try {
-    // Write CSV header if file is new
-    let needsHeader = false;
-    try {
-      await readFile(requestsCsv, "utf8");
-    } catch {
-      needsHeader = true;
-    }
-    const line = `${needsHeader ? "email,requestedAt\n" : ""}${email},${new Date().toISOString()}\n`;
-    await appendFile(requestsCsv, line, "utf8");
+    res = await fetch(SHEET_API_URL, {
+      method: "POST",
+      // text/plain avoids an Apps Script CORS preflight; the body is still JSON.
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action, ...body })
+    });
   } catch (err) {
-    console.error("[Auth] Could not write requests.csv:", err.message);
+    const error = new Error("Could not reach the access service. Try again shortly.");
+    error.status = 502;
+    throw error;
   }
+  if (!res.ok) {
+    const error = new Error("The access service returned an error.");
+    error.status = 502;
+    throw error;
+  }
+  const data = await res.json();
+  if (data && data.error) {
+    const error = new Error(data.error);
+    error.status = data.error === "forbidden" ? 403 : 400;
+    throw error;
+  }
+  return data;
 }
 
-// ─── Admin helpers ────────────────────────────────────────────────────────────
+// ─── Admin helpers ────────────────────────────────────────────────────────
 
 function getAdminEmails() {
   return (process.env.ADMIN_EMAILS || "")
@@ -67,76 +65,14 @@ function isAdmin(email) {
   return getAdminEmails().includes(email.toLowerCase());
 }
 
-// ─── Nodemailer ───────────────────────────────────────────────────────────────
-
-function createTransport() {
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return null;
-  return nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: Number(SMTP_PORT || 587),
-    secure: Number(SMTP_PORT) === 465,
-    auth: { user: SMTP_USER, pass: SMTP_PASS }
-  });
+function usesLeftFor(record) {
+  // Staff and paid users are unlimited (null = no cap).
+  if (record.role === "staff" || record.paid === "yes") return null;
+  const limit = Number(record.trialLimit || TRIAL_LIMIT);
+  return Math.max(0, limit - Number(record.trialsUsed || 0));
 }
 
-export async function sendOwnerNotification(newUserEmail) {
-  const transport = createTransport();
-  const ownerEmail = process.env.OWNER_EMAIL;
-
-  // Always write to CSV
-  await appendRequestCsv(newUserEmail);
-
-  if (!transport || !ownerEmail) {
-    console.log(`[Auth] New pending user (no SMTP configured): ${newUserEmail}`);
-    return;
-  }
-
-  await transport.sendMail({
-    from: `"VoxText Studio" <${process.env.SMTP_USER}>`,
-    to: ownerEmail,
-    subject: "VoxText Studio: New access request",
-    text: [
-      `${newUserEmail} has requested access to VoxText Studio.`,
-      ``,
-      `To approve them, open your browser console while logged in as admin and run:`,
-      ``,
-      `fetch("/api/admin/approve", {`,
-      `  method: "POST",`,
-      `  headers: { "Content-Type": "application/json" },`,
-      `  body: JSON.stringify({ email: "${newUserEmail}" })`,
-      `}).then(r => r.json()).then(console.log)`,
-      ``,
-      `Or use the /api/admin/pending endpoint to see all pending requests.`
-    ].join("\n")
-  });
-}
-
-export async function sendContactNotification(contact) {
-  const transport = createTransport();
-  const ownerEmail = process.env.OWNER_EMAIL;
-
-  if (!transport || !ownerEmail) {
-    console.log(`[Auth] Contact form submission (no SMTP configured): ${JSON.stringify(contact)}`);
-    return;
-  }
-
-  await transport.sendMail({
-    from: `"VoxText Studio" <${process.env.SMTP_USER}>`,
-    to: ownerEmail,
-    subject: "VoxText Studio: Trial upgrade request",
-    text: [
-      `A user has submitted an upgrade request after reaching their trial limit.`,
-      ``,
-      `Name:    ${contact.name}`,
-      `Phone:   ${contact.phone || "—"}`,
-      `Email:   ${contact.email || "—"}`,
-      `Message: ${contact.message}`
-    ].join("\n")
-  });
-}
-
-// ─── Exported middleware ───────────────────────────────────────────────────────
+// ─── Exported middleware ─────────────────────────────────────────────────────
 
 export function requireAuth(req, res, next) {
   if (!req.session || !req.session.email) {
@@ -155,9 +91,9 @@ export function requireAdminSession(req, res, next) {
   next();
 }
 
-// ─── Route handlers ───────────────────────────────────────────────────────────
+// ─── Route handlers ───────────────────────────────────────────────────────
 
-export async function handleLogin(req, res) {
+export async function handleLogin(req, res, next) {
   const email = (req.body.email || "").trim().toLowerCase();
   const password = req.body.password || "";
 
@@ -165,97 +101,81 @@ export async function handleLogin(req, res) {
     return res.status(400).json({ error: "Enter a valid email address." });
   }
 
-  // ── Admin path ──
+  // ── Admin path (tool owners — full unlimited access) ──
   if (isAdmin(email)) {
-    if (!password) {
-      // Tell frontend to show the password field
-      return res.json({ requiresPassword: true });
-    }
+    if (!password) return res.json({ requiresPassword: true });
     if (password !== process.env.ADMIN_PASSWORD) {
       return res.status(403).json({ error: "Incorrect admin password." });
     }
     req.session.email = email;
     req.session.role = "admin";
-    req.session.usesLeft = null; // unlimited
+    req.session.usesLeft = null;
     return res.json({ ok: true, role: "admin" });
   }
 
-  // ── Regular user path ──
-  const users = await readUsers();
-  const record = users[email];
+  // ── Everyone else: ask the Sheet ──
+  try {
+    let record = await sheetApi("check", { email });
 
-  if (!record) {
-    // Unknown user: add as pending and notify owner
-    users[email] = {
-      status: "pending",
-      uses: 0,
-      requestedAt: new Date().toISOString(),
-      approvedAt: null
-    };
-    await writeUsers(users);
-    sendOwnerNotification(email).catch(console.error);
-    return res.json({ status: "pending" });
+    if (record.status === "unknown") {
+      // First time here: register them as pending so an admin can approve.
+      await sheetApi("request", { email });
+      return res.json({ status: "pending" });
+    }
+    if (record.status === "pending") {
+      return res.json({ status: "pending" });
+    }
+    if (record.status === "rejected") {
+      return res.status(403).json({ error: "Access denied." });
+    }
+    if (record.status === "approved") {
+      const usesLeft = usesLeftFor(record);
+      req.session.email = email;
+      req.session.role = record.role === "staff" ? "staff" : "user";
+      req.session.usesLeft = usesLeft;
+      return res.json({ ok: true, role: req.session.role, usesLeft });
+    }
+    return res.status(403).json({ error: "Access denied." });
+  } catch (error) {
+    return next(error);
   }
-
-  if (record.status === "pending") {
-    return res.json({ status: "pending" });
-  }
-
-  if (record.status === "approved") {
-    const usesLeft = Math.max(0, 2 - (record.uses || 0));
-    req.session.email = email;
-    req.session.role = "user";
-    req.session.usesLeft = usesLeft;
-    return res.json({ ok: true, role: "user", usesLeft });
-  }
-
-  return res.status(403).json({ error: "Access denied." });
 }
 
-export async function handleAdminApprove(req, res) {
+export async function handleAdminApprove(req, res, next) {
   const email = (req.body.email || "").trim().toLowerCase();
   if (!email) return res.status(400).json({ error: "Email required." });
-
-  const users = await readUsers();
-  if (!users[email]) {
-    // Allow approving an email that hasn't requested yet (pre-approve)
-    users[email] = {
-      status: "approved",
-      uses: 0,
-      requestedAt: new Date().toISOString(),
-      approvedAt: new Date().toISOString()
-    };
-  } else {
-    users[email].status = "approved";
-    users[email].approvedAt = new Date().toISOString();
+  try {
+    await sheetApi("approve", { email, secret: SHEET_SERVER_SECRET });
+    res.json({ ok: true, email });
+  } catch (error) {
+    next(error);
   }
-  await writeUsers(users);
-  res.json({ ok: true, email });
 }
 
-export async function handleAdminPending(req, res) {
-  const users = await readUsers();
-  const pending = Object.entries(users)
-    .filter(([, v]) => v.status === "pending")
-    .map(([email, v]) => ({ email, requestedAt: v.requestedAt }))
-    .sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
-  res.json({ pending });
-}
-
-export async function handleAdminReject(req, res) {
+export async function handleAdminReject(req, res, next) {
   const email = (req.body.email || "").trim().toLowerCase();
   if (!email) return res.status(400).json({ error: "Email required." });
-
-  const users = await readUsers();
-  if (!users[email]) {
-    return res.status(404).json({ error: "No request found for that email." });
+  try {
+    await sheetApi("reject", { email, secret: SHEET_SERVER_SECRET });
+    res.json({ ok: true, email });
+  } catch (error) {
+    next(error);
   }
-  delete users[email];
-  await writeUsers(users);
-  res.json({ ok: true, email });
 }
 
-export async function handleContactSubmit(req, res) {
+export async function handleAdminPending(req, res, next) {
+  try {
+    const data = await sheetApi("list", { secret: SHEET_SERVER_SECRET });
+    const pending = (data.items || [])
+      .filter((it) => it.status === "pending")
+      .map((it) => ({ email: it.email, requestedAt: it.createdAt }));
+    res.json({ pending });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleContactSubmit(req, res, next) {
   const { name, phone, message } = req.body || {};
   const email = req.session?.email || (req.body?.email || "").trim().toLowerCase();
 
@@ -265,27 +185,32 @@ export async function handleContactSubmit(req, res) {
   if (!message || !String(message).trim()) {
     return res.status(400).json({ error: "Message is required." });
   }
+  if (!email) {
+    return res.status(400).json({ error: "Email is required." });
+  }
 
-  const contacts = await readContacts();
-  const entry = {
-    id: randomUUID(),
-    email: email || "—",
-    name: String(name).trim(),
-    phone: String(phone || "").trim(),
-    message: String(message).trim(),
-    submittedAt: new Date().toISOString()
-  };
-  contacts.push(entry);
-  await writeContacts(contacts);
-  sendContactNotification(entry).catch(console.error);
-  res.json({ ok: true });
+  try {
+    await sheetApi("contact", {
+      secret: SHEET_SERVER_SECRET,
+      email,
+      name: String(name).trim(),
+      phone: String(phone || "").trim(),
+      message: String(message).trim()
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
 }
 
+// Called after a successful transcription for normal users. Returns the
+// updated trial state so the caller can refresh the session's usesLeft.
 export async function incrementUserUses(email) {
-  if (!email) return;
-  const users = await readUsers();
-  if (users[email]) {
-    users[email].uses = (users[email].uses || 0) + 1;
-    await writeUsers(users);
+  if (!email) return null;
+  try {
+    return await sheetApi("consume", { email, secret: SHEET_SERVER_SECRET });
+  } catch (error) {
+    console.error("[Auth] consume failed:", error.message);
+    return null;
   }
 }
